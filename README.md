@@ -17,7 +17,7 @@ https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-S3
 8. if step 5 is successful, right click docker-compose.yml file and select 'compose up'
 9. Open Docker-Desktop, confirm is images are running. If yes, navigate to containers and access the airflow UI through the provided URL with port: 8080:8080
 10. To login to Airflow UI, obtain password from the 'standalone_admin_password.txt' file in airflow folder
-11. Login to Airflow UI, click on Admin at the top center, select Variables and saved the API_ID and API_KEY. click on Admin again, select Connections and supply the correct PostgreSQL credentials and save.
+11. Login to Airflow UI, click on Admin at the top center, select Variables and create required Variables . click on Admin again
 Note: when running PostgreSQL through Docker, the host should be 'host.docker.internal' and not 'localhost'
 12. Now click on the dag and trigger it manually.
 
