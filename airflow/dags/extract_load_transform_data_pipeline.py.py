@@ -21,7 +21,7 @@ logging.basicConfig(filename=log_file_path, level=logging.ERROR, format='%(ascti
 logging.info("Workflow started logged in successfully.")
 
 @dag(
-    'S3_to_Postgres_S3',
+    'scheduled_data_pipeline',
     default_args={
         'owner': 'uchejudennodim@gmail.com',
         'depends_on_past': False,
@@ -48,7 +48,7 @@ def daily_extraction_dag():
                 os.makedirs(folder)
                 s3.download_file(bucket_name, "orders_data/orders.csv", os.path.join(folder,"orders.csv"))
                 s3.download_file(bucket_name, "orders_data/reviews.csv", os.path.join(folder,"reviews.csv"))
-                s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv", Path(os.path.join(folder,"shipment_deliveries.csv")))
+                s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv", os.path.join(folder,"shipment_deliveries.csv"))
             else:  
                 s3.download_file(bucket_name, "orders_data/orders.csv", os.path.join(folder,"orders.csv"))
                 s3.download_file(bucket_name, "orders_data/reviews.csv", os.path.join(folder,"reviews.csv"))
@@ -92,35 +92,25 @@ def daily_extraction_dag():
     
 
     @task(task_id="connect_to_postgres")
-    def connect_to_postgres_with_alchemy(username: str, password: str, host: str, database: str):
+    def connect_to_postgres_and_load_data(username: str, password: str, 
+                                          host: str, database: str, dataframe_dict: dict):
         try:
             conn_str = f'postgresql://{username}:{password}@{host}:5432/{database}'
             engine = create_engine(conn_str)
             logging.info('successfully connected to postgres')
-            return engine            
-
-        except Exception as e:
-            logging.error(f"Exception occurred: {str(e)}")
-            logging.error(f"Timestamp: {datetime.now()}")
-            logging.error(f"Traceback: {traceback.format_exc()}")
-
-
-    # Step 4: Load dataframes into different tables in Postgres database
-    @task(task_id="load_data_into_postgres")
-    def load_dataframes_into_postgres(dataframe_dict, engine):
-        try:
             for name, df in dataframe_dict.items():
                 table_name = name
-                # print(table_name)
                 df.to_sql(f'staging.{table_name}', engine, index=False, if_exists='append')
-            logging.info('file successfully loaded into postgres')
-            return 'files loaded'
-            
-            
+                logging.info(f'{name} file successfully loaded into postgres table {name}')
+
+            return 'all files loaded successfully loaded into postgres'
+
         except Exception as e:
             logging.error(f"Exception occurred: {str(e)}")
             logging.error(f"Timestamp: {datetime.now()}")
             logging.error(f"Traceback: {traceback.format_exc()}")
+
+
 
     # Step 5: Perform transformation inside Postgres (using SQL queries)
     @task(task_id="transformation_in_postgres")
@@ -180,16 +170,17 @@ def daily_extraction_dag():
     db_password = Variable.get('POSTGRES_PASSWORD')
     db_host = Variable.get('POSTGRES_HOST') 
     db_name = Variable.get('POSTGRES_DBNAME')
-    raw_folder_path = os.path.join(local_directory, current_date_folder)
-    download_files_from_S3(bucket_name)
-    result = read_csv_files_into_dictionary(raw_folder_path)
-    engine = connect_to_postgres_with_alchemy(db_user,db_password,db_host,db_name)
+    # raw_folder_path = os.path.join(local_directory, current_date_folder)
+    download_task = download_files_from_S3(bucket_name)
+    read_csv_task = read_csv_files_into_dictionary(download_task.output)
+    # engine = connect_to_postgres_and_load_data(db_user,db_password,db_host,db_name,read_csv_task.output)
     #load_dataframes_into_postgres(result, engine)
     #perform_transformation_in_postgres(engine)
     # download_and_upload_transformed_data_S3(engine, bucket_name, s3)
 
     # Set dependencies
-    download_files_from_S3 >> read_csv_files_into_dictionary >> connect_to_postgres_with_alchemy >> load_dataframes_into_postgres >> perform_transformation_in_postgres >> download_and_upload_transformed_data_S3
+    download_task >> read_csv_task
+    #>> load_dataframes_into_postgres >> perform_transformation_in_postgres >> download_and_upload_transformed_data_S3
      
 daily_extraction_dag_instance = daily_extraction_dag()
 
