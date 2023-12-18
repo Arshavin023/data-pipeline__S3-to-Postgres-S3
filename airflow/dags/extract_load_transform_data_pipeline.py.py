@@ -10,6 +10,7 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 from botocore.client import Config
 from botocore import UNSIGNED
 import boto3
+import numpy as np
 from sqlalchemy import create_engine
 from airflow.utils.dates import days_ago
 
@@ -23,7 +24,7 @@ logging.basicConfig(filename=log_file_path, level=logging.ERROR, format='%(ascti
 
 # 2. DAG Definition
 @dag(
-    'scheduled_data_pipeline',
+    'scheduled_elt_pipeline',
     default_args={
         'owner': 'uchejudennodim@gmail.com',
         'depends_on_past': False,
@@ -49,15 +50,12 @@ def daily_extraction_dag():
             folder = os.path.join(local_directory, current_date_folder)
             if not os.path.exists(folder):
                 os.makedirs(folder)
-                s3.download_file(bucket_name, "orders_data/orders.csv", os.path.join(folder, "orders.csv"))
-                s3.download_file(bucket_name, "orders_data/reviews.csv", os.path.join(folder, "reviews.csv"))
-                s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv",
-                                 os.path.join(folder, "shipment_deliveries.csv"))
+                for file_name in ["orders.csv", "reviews.csv", "shipment_deliveries.csv"]:
+                    s3.download_file(bucket_name, f"orders_data/{file_name}", os.path.join(folder, file_name))
             else:
-                s3.download_file(bucket_name, "orders_data/orders.csv", os.path.join(folder, "orders.csv"))
-                s3.download_file(bucket_name, "orders_data/reviews.csv", os.path.join(folder, "reviews.csv"))
-                s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv",
-                                 os.path.join(folder, "shipment_deliveries.csv"))
+                for file_name in ["orders.csv", "reviews.csv", "shipment_deliveries.csv"]:
+                    s3.download_file(bucket_name, f"orders_data/{file_name}", os.path.join(folder, file_name))
+                    
             logging.info('Files successfully downloaded')
             return folder
 
@@ -82,30 +80,45 @@ def daily_extraction_dag():
             raise RuntimeError(f"Exception occurred: {str(e)}\n{traceback.format_exc()}")
 
     @task(task_id="connect_to_postgres")
-    def connect_to_postgres_and_get_engine(username: str, password: str,
-                                       host: str, database: str):
+    def connect_to_postgres_and_load_data(dataframe_dict, conn_id):
         try:
-            conn_str = f'postgresql://{username}:{password}@{host}:5432/{database}'
-            engine = create_engine(conn_str)
-            return engine
-        
-        except Exception as e:
-            raise RuntimeError(f"Exception occurred: {str(e)}\n{traceback.format_exc()}")
+            for table_name, df in dataframe_dict.items():
+                if table_name != 'reviews':
+                    # Convert the DataFrame to a list of tuples for bulk insert
+                    # data_tuples = [tuple(row) for row in df.to_numpy()]
+                    data_tuples = [tuple(map(lambda x: int(x) if isinstance(x, np.int64) else x, row)) for row in df.to_numpy()]
 
-    @task(task_id="load_files_into_postgres")
-    def connect_to_postgres_and_load_data(engine, dataframe_dict: dict) -> str:
-        try:
-            for name, df in dataframe_dict.items():
-                table_name = name
-                df.to_sql(f'staging.{table_name}', engine, index=False, if_exists='append')
-                logging.info(f'{name} file successfully loaded into PostgreSQL table {name}')
-            return 'All files loaded successfully into PostgreSQL'
+                    # Use PostgresHook to execute the insert query
+                    hook = PostgresHook(postgres_conn_id=conn_id)
+                    primary_key_column = list(df.columns)[0]
+                    # Check for existing records before insert
+                    existing_records = hook.get_records(f'''SELECT case when MAX(CAST({primary_key_column} AS INT)) 
+                                                        is NULL then 0 else MAX(CAST({primary_key_column} AS INT)) 
+                                                        end as max_num
+                                                        FROM staging.{table_name}''')
+                    # existing_ids = set(record[0] for record in existing_records)
+                    max_id = existing_records[0][0]
+                    deduplicated_data_tuples = [row for row in data_tuples if int(row[0]) > max_id]
+                    if deduplicated_data_tuples is not None:
+                        hook.insert_rows(table=f'staging.{table_name}', rows=deduplicated_data_tuples)
+                        logging.info(f'Data successfully inserted into staging.{table_name} on PostgreSQL')
+                    else:
+                        pass
+                        logging.info(f'No new data to insert into staging.{table_name}')
+
+                else:
+                    data_tuples = [tuple(map(lambda x: int(x) if isinstance(x, np.int64) else x, row)) for row in df.to_numpy()]
+                    hook = PostgresHook(postgres_conn_id=conn_id)
+                    hook.insert_rows(table=f'staging.{table_name}', rows=data_tuples)
+                    logging.info(f'Data successfully inserted into staging.{table_name} on PostgreSQL')
+
+            return "all csv files successfully loaded into staging in Postgres"
 
         except Exception as e:
             raise RuntimeError(f"Exception occurred: {str(e)}\n{traceback.format_exc()}")
 
     @task(task_id="transformation_in_postgres")
-    def perform_transformation_in_postgres(engine) -> str:
+    def perform_transformation(engine) -> str:
         sql_file_path = Path("/app/sql/transformation.sql")
         
         try:
@@ -150,19 +163,15 @@ def daily_extraction_dag():
     current_date = datetime.now().strftime('%Y-%m-%d')
     current_date_folder = Path('raw_files'+f'_{current_date}')
     bucket_name = Variable.get('BUCKET_NAME')
-    db_user = Variable.get('POSTGRES_USER')
-    db_password = Variable.get('POSTGRES_PASSWORD')
-    db_host = Variable.get('POSTGRES_HOST') 
-    db_name = Variable.get('POSTGRES_DBNAME')
+    postgres_conn_id = 'postgres_conn_id'  # Specify the Airflow connection ID for PostgreSQL
     download_task = download_files_from_s3(bucket_name)
-    read_csv_task = read_csv_files_into_dictionary(download_task)
-    # engine = connect_to_postgres_and_load_data(db_user,db_password,db_host,db_name,read_csv_task.output)
-    #load_dataframes_into_postgres(result, engine)
-    #perform_transformation_in_postgres(engine)
+    dataframe_dict = read_csv_files_into_dictionary(download_task)
+    loading_data = connect_to_postgres_and_load_data(dataframe_dict, postgres_conn_id)
+    # transformation = perform_transformation(engine)
     # download_and_upload_transformed_data_S3(engine, bucket_name, s3)
 
     # Set dependencies
-    download_task >> read_csv_task
+    download_task >> dataframe_dict >> loading_data
     #>> load_dataframes_into_postgres >> perform_transformation_in_postgres >> download_and_upload_transformed_data_S3
      
 daily_extraction_dag()
