@@ -21,7 +21,7 @@ logging.basicConfig(filename=log_file_path, level=logging.ERROR, format='%(ascti
 logging.info("Workflow started logged in successfully.")
 
 @dag(
-    'scheduled_extraction_of_data_S3_to_Postgres_S3',
+    'S3_to_Postgres_S3',
     default_args={
         'owner': 'uchejudennodim@gmail.com',
         'depends_on_past': False,
@@ -35,25 +35,27 @@ logging.info("Workflow started logged in successfully.")
 
 def daily_extraction_dag():
 
-    @task()
-    def download_files_from_S3(bucket_name):
+    @task(task_id="download_files_task")
+    def download_files_from_S3(bucket_name,**kwargs):
         try:
             s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
-            local_directory = "/usr/local/airflow/data"
+            local_directory = "/opt/airflow/data"
             os.makedirs(local_directory, exist_ok=True)
             current_date = datetime.now().strftime('%Y-%m-%d')
             current_date_folder = 'raw_files'+f'_{current_date}'
             folder = os.path.join(local_directory,current_date_folder)
             if not os.path.exists(folder):
                 os.makedirs(folder)
-                s3.download_file(bucket_name, "orders_data/orders.csv", Path(os.path.join(folder,"orders.csv")))
-                s3.download_file(bucket_name, "orders_data/reviews.csv", Path(os.path.join(folder,"reviews.csv")))
+                s3.download_file(bucket_name, "orders_data/orders.csv", os.path.join(folder,"orders.csv"))
+                s3.download_file(bucket_name, "orders_data/reviews.csv", os.path.join(folder,"reviews.csv"))
                 s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv", Path(os.path.join(folder,"shipment_deliveries.csv")))
             else:  
-                s3.download_file(bucket_name, "orders_data/orders.csv", Path(os.path.join(folder,"orders.csv")))
-                s3.download_file(bucket_name, "orders_data/reviews.csv", Path(os.path.join(folder,"reviews.csv")))
-                s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv", Path(os.path.join(folder,"shipment_deliveries.csv")))
+                s3.download_file(bucket_name, "orders_data/orders.csv", os.path.join(folder,"orders.csv"))
+                s3.download_file(bucket_name, "orders_data/reviews.csv", os.path.join(folder,"reviews.csv"))
+                s3.download_file(bucket_name, "orders_data/shipment_deliveries.csv", os.path.join(folder,"shipment_deliveries.csv"))
             logging.info('files successfully downloaded')
+
+            return folder
             
         except Exception as e:
             logging.error(f"Exception occurred: {str(e)}")
@@ -62,8 +64,8 @@ def daily_extraction_dag():
     
 
            # Read CSV files into a dictionary
-    @task()
-    def read_csv_files_into_dictionary(raw_folder_path):   
+    @task(task_id="read_csv_task")
+    def read_csv_files_into_dictionary(raw_folder_path, **kwargs):   
         try: 
             # Get a list of all files in the folder
             files = os.listdir(raw_folder_path)
@@ -78,6 +80,7 @@ def daily_extraction_dag():
                 key = csv_file.split('.')[0]
                 dataframes_dict[key] = df
             logging.info('successfully read in csv files from filepath and saved into dictionary')
+            
             return dataframes_dict
             
         except Exception as e:
@@ -88,7 +91,7 @@ def daily_extraction_dag():
         
     
 
-    @task()
+    @task(task_id="connect_to_postgres")
     def connect_to_postgres_with_alchemy(username: str, password: str, host: str, database: str):
         try:
             conn_str = f'postgresql://{username}:{password}@{host}:5432/{database}'
@@ -103,6 +106,7 @@ def daily_extraction_dag():
 
 
     # Step 4: Load dataframes into different tables in Postgres database
+    @task(task_id="load_data_into_postgres")
     def load_dataframes_into_postgres(dataframe_dict, engine):
         try:
             for name, df in dataframe_dict.items():
@@ -110,6 +114,8 @@ def daily_extraction_dag():
                 # print(table_name)
                 df.to_sql(f'staging.{table_name}', engine, index=False, if_exists='append')
             logging.info('file successfully loaded into postgres')
+            return 'files loaded'
+            
             
         except Exception as e:
             logging.error(f"Exception occurred: {str(e)}")
@@ -117,6 +123,7 @@ def daily_extraction_dag():
             logging.error(f"Traceback: {traceback.format_exc()}")
 
     # Step 5: Perform transformation inside Postgres (using SQL queries)
+    @task(task_id="transformation_in_postgres")
     def perform_transformation_in_postgres(engine):
         sql_file_path = Path("sql/transformation.sql")
         with open(sql_file_path, 'r') as file:
@@ -126,6 +133,7 @@ def daily_extraction_dag():
                 # Add your SQL transformation queries here
                 conn.execute(sql_query)
             logging.info('successfully performed transformation in postgres')
+            return 'transformation successfully completed'
         
         except Exception as e:
             logging.error(f"Exception occurred: {str(e)}")
@@ -133,6 +141,7 @@ def daily_extraction_dag():
             logging.error(f"Traceback: {traceback.format_exc()}")
         
     # Step 6: Download transformed data from Postgres
+    @task(task_id="postgres_to_S3")     
     def download_and_upload_transformed_data_S3(engine, bucket_name, s3):
         agg_public_holiday = 'SELECT * FROM analytics.agg_public_holiday'
         agg_shipments = 'SELECT * FROM analytics.agg_shipments'
@@ -154,6 +163,7 @@ def daily_extraction_dag():
                     s3.put_object(Body=csv_buffer.getvalue(), Bucket=bucket_name, Key = key)
 
             logging.info('successfully uploaded transformed files into S3')
+            return 'successfully uploaded transformed data into S3'
 
         except Exception as e:
             logging.error(f"Exception occurred: {str(e)}")
@@ -164,13 +174,13 @@ def daily_extraction_dag():
     # Postgres database credentials
     current_date = datetime.now().strftime('%Y-%m-%d')
     current_date_folder = Path('raw_files'+f'_{current_date}')
-    local_directory = "/usr/local/airflow/data"
+    local_directory = "/opt/airflow/data"
     bucket_name = Variable.get('BUCKET_NAME')
     db_user = Variable.get('POSTGRES_USER')
     db_password = Variable.get('POSTGRES_PASSWORD')
     db_host = Variable.get('POSTGRES_HOST') 
     db_name = Variable.get('POSTGRES_DBNAME')
-    raw_folder_path = Path(os.path.join(local_directory, current_date_folder))
+    raw_folder_path = os.path.join(local_directory, current_date_folder)
     download_files_from_S3(bucket_name)
     result = read_csv_files_into_dictionary(raw_folder_path)
     engine = connect_to_postgres_with_alchemy(db_user,db_password,db_host,db_name)
@@ -178,7 +188,10 @@ def daily_extraction_dag():
     #perform_transformation_in_postgres(engine)
     # download_and_upload_transformed_data_S3(engine, bucket_name, s3)
 
-daily_extraction_dag()
+    # Set dependencies
+    download_files_from_S3 >> read_csv_files_into_dictionary >> connect_to_postgres_with_alchemy >> load_dataframes_into_postgres >> perform_transformation_in_postgres >> download_and_upload_transformed_data_S3
+     
+daily_extraction_dag_instance = daily_extraction_dag()
 
 
 
