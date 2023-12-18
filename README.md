@@ -21,6 +21,7 @@ https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-to-S3
 Note: when running PostgreSQL through Docker, the host should be 'host.docker.internal' and not 'localhost'
 12. Now click on the dag and trigger it manually.
 
+<img width="946" alt="successfully_completed" src="https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-to-S3/assets/77532336/ce8368af-4868-4e84-8a27-5648911e27f0">
 
 
 
