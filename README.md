@@ -3,7 +3,7 @@
 ### STEPS:
 Clone the repository
 ```bash
-https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-S3
+https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-to-S3
 ```
 
 ### Step
