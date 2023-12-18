@@ -13,7 +13,6 @@ USER airflow
 WORKDIR /app
 
 # Copy raw_files and sql folder into container at app
-COPY ./sql/transformation.sql /app/sql/transformation.sql
 # Copy the requirements file into the container at /app
 COPY ./requirements.txt /app/requirements.txt
 RUN pip install --user --upgrade pip
