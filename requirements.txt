@@ -117,6 +117,7 @@ python-slugify==8.0.1
 pytz==2023.3.post1
 pytzdata==2020.1
 PyYAML==6.0.1
+redis
 referencing==0.32.0
 requests==2.31.0
 requests-toolbelt==1.0.0

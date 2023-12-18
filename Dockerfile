@@ -12,8 +12,7 @@ USER airflow
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy raw_files and sql folder into container at app
-# Copy the requirements file into the container at /app
 COPY ./requirements.txt /app/requirements.txt
+COPY ./sql/transformation.sql /app/sql/transformation.sql
 RUN pip install --user --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
