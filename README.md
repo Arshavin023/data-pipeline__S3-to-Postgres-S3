@@ -1,4 +1,5 @@
-# data-pipeline__S3-to-Postgres-S3
+## Description 
+The project aimed to extract and process sales, shipping, and product reviews data from a cloud storage (Amazon S3) to a PostgreSQL relational database. A Python script was developed as a DAG, orchestrated and scheduled with Apache Airflow, and encapsulated within a Docker container for efficient data engineering task management. The cleansed dataset was uploaded back to AWS S3.
 
 ### STEPS:
 Clone the repository
