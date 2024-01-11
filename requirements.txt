@@ -150,3 +150,7 @@ WTForms==3.0.1
 xecd-rates-client==1.0.0
 yarl==1.9.4
 zipp==3.17.0
+mysql-connector-python
+clickhouse-driver
+
+
