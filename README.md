@@ -1,4 +1,5 @@
-# data-pipeline__S3-to-Postgres-S3
+## Description 
+The project aimed to extract and process sales, shipping, and product reviews data from a cloud storage (Amazon S3) to a PostgreSQL relational database. A Python script was developed as a DAG, orchestrated and scheduled with Apache Airflow, and encapsulated within a Docker container for efficient data engineering task management. The cleansed dataset was uploaded back to AWS S3.
 
 ### STEPS:
 Clone the repository
@@ -21,6 +22,7 @@ https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-to-S3
 Note: when running PostgreSQL through Docker, the host should be 'host.docker.internal' and not 'localhost'
 12. Now click on the dag and trigger it manually.
 
+<img width="946" alt="successfully_completed" src="https://github.com/Arshavin023/data-pipeline__S3-to-Postgres-to-S3/assets/77532336/ce8368af-4868-4e84-8a27-5648911e27f0">
 
 
 
